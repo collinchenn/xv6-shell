@@ -134,6 +134,7 @@ UPROGS=\
 	$U/_ls\
 	$U/_mkdir\
         $U/_myshell\
+        $U/_pwd\
 	$U/_rm\
 	$U/_sh\
 	$U/_stressfs\
