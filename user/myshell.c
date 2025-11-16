@@ -22,7 +22,7 @@ int parse_input(char *line, char *argv[]) {
   // return 0, which reprompts
   if (*p == '\0') { return 0; }
 
-  while (*p != '\0') {
+  while (*p != '\0' && argc < MAX_ARGS - 1) {
     // Beginning of word
     argv[argc++] = p;
 
@@ -81,13 +81,13 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
-    // if fork is the child, execute process
+    // If pid is the child, execute process
     if (pid == 0) {
       if (exec(parsed_args[0], parsed_args) < 0) {
         fprintf(2, "error finding syscall\n");
         exit(1);
       }
-    // wait for process to finish
+    // Otherwise, pid is parent; wait for child
     } else {
       wait(0);
     }
