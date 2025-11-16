@@ -5,7 +5,10 @@
 #define MAX_ARGS 32
 static char input_buffer[IB_LEN];
 
-int parse_input(char *line, char *argv[]) {
+// Helper functions
+
+int
+parse_input(char *line, char *argv[]) {
   int argc = 0;
   char *p = line;
 
@@ -49,7 +52,14 @@ int parse_input(char *line, char *argv[]) {
   return argc;
 }
 
-int main(int argc, char *argv[]) {
+// Built-in methods
+
+
+
+// Main
+
+int
+main(int argc, char *argv[]) {
   // Stores the user-passed args
   // ex: ['echo', 'hello', 'world', 0]
   char* parsed_args[MAX_ARGS];
@@ -74,6 +84,30 @@ int main(int argc, char *argv[]) {
     int n = parse_input(input_buffer, parsed_args);
     if (n == 0) { continue; }
 
+// Built-in methods
+
+    if (strcmp(parsed_args[0], "cd") == 0) {
+      chdir(parsed_args[0]);
+      continue;
+    }
+
+    if (strcmp(parsed_args[0], "exit") == 0) {
+      int status_code = 0;
+      printf("bye\n");
+      exit(status_code);
+    }
+
+    if (strcmp(parsed_args[0], "about") == 0) {
+      printf("MyShell:\n");
+      printf("  This shell can predict what you are going to run before\n");
+      printf("  you do it. For example, it knew you were gonna call the\n");
+      printf("  built-in 'about', and well... here you are.\n\n");
+      printf("Author: Collin Chen\n");
+      continue;
+    }
+
+// Exec commands
+
     // Create a fork of the current process
     int pid = fork();
     if (pid < 0) {
@@ -93,4 +127,3 @@ int main(int argc, char *argv[]) {
     }
   }
 }
-
