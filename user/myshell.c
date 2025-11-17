@@ -3,6 +3,7 @@
 
 #define IB_LEN 1024
 #define MAX_ARGS 32
+#define MAX_CMD_LEN 512
 static char input_buffer[IB_LEN];
 
 // Helper functions
@@ -52,9 +53,43 @@ parse_input(char *line, char *argv[]) {
   return argc;
 }
 
-// Built-in methods
+int
+parse_exit(char *x) {
+  // x cannot be null
+  // or parse_exit will not be called
+  int sign = 1;
+  int i = 0;
 
+  if (x[i] == '-') {
+    sign = -1;
+    i++;
+  }
 
+  if (x[i] == '\0') { return -1; }
+
+  for (int j = i; x[j]; j++) {
+    if (x[j] < '0' || x[j] > '9') {
+      return -1;
+    }
+  }
+
+  if (sign < 0) {
+    x++;
+  }
+  int x_int = atoi(x);
+  printf("xafter atoi: %d", x_int);
+  return sign * x_int;
+}
+
+int
+contains_slash(const char *s) {
+  for (; *s; s++) {
+    if (*s == '/') {
+      return 1;
+    }
+  }
+  return 0;
+}
 
 // Main
 
@@ -87,13 +122,22 @@ main(int argc, char *argv[]) {
 // Built-in methods
 
     if (strcmp(parsed_args[0], "cd") == 0) {
-      chdir(parsed_args[0]);
+      char* path = parsed_args[1];
+      if (*path == 0 || chdir(path) < 0) {
+        fprintf(2, "error\n");
+      }
       continue;
     }
 
     if (strcmp(parsed_args[0], "exit") == 0) {
-      int status_code = 0;
+      int status_code;
+      if (*parsed_args[1] == 0) {
+        status_code = 0;
+      } else {
+        status_code = parse_exit(parsed_args[1]);
+      }
       printf("bye\n");
+      printf("status code: %d\n", status_code);
       exit(status_code);
     }
 
@@ -111,14 +155,30 @@ main(int argc, char *argv[]) {
     // Create a fork of the current process
     int pid = fork();
     if (pid < 0) {
-      fprintf(2, "error forking\n");
+      fprintf(2, "error\n"); // forking
       continue;
     }
 
     // If pid is the child, execute process
     if (pid == 0) {
       if (exec(parsed_args[0], parsed_args) < 0) {
-        fprintf(2, "error finding syscall\n");
+        // If exact path fails, see if only
+        // the name of the binary file was given
+        if (!contains_slash(parsed_args[0])) {
+          char fallback[MAX_CMD_LEN];
+          int i = 0;
+
+          fallback[i++] = '/';
+          for (char *s = parsed_args[0]; *s && i < MAX_CMD_LEN - 1; s++) {
+            fallback[i++] = *s;
+          }
+          fallback[i] = '\0';
+
+          exec(fallback, parsed_args);
+        }
+
+        // If this point is reached, can't EXEC
+        fprintf(2, "error\n");
         exit(1);
       }
     // Otherwise, pid is parent; wait for child
