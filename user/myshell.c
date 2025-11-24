@@ -1,4 +1,5 @@
 #include "kernel/types.h"
+#include "kernel/fcntl.h"
 #include "user/user.h"
 
 #define STDERR 2
@@ -56,6 +57,34 @@ parse_input(char *line, char *argv[]) {
   // Null terminate argv for exec()
   argv[argc] = 0;
   return argc;
+}
+
+int
+parse_redirections(char *argv[], char **in, char **out) {
+  int i = 0;
+  int j = 0;
+  *in = 0;
+  *out = 0;
+
+  while (argv[i]) {
+    if (strcmp("<", argv[i]) == 0) {
+      if (argv[i+1] == 0 || *in) {
+        return -1;
+      }
+      *in = argv[i+1];
+      i += 2;
+    } else if (strcmp(">", argv[i]) == 0) {
+      if (argv[i+1] == 0 || *out) {
+        return -1;
+      }
+      *out = argv[i+1];
+      i += 2;
+    } else {
+      argv[j++] = argv[i++];
+    }
+  }
+  argv[j] = 0;
+  return 0;
 }
 
 int
@@ -138,8 +167,8 @@ cd_cmd(void) {
 }
 
 void
-execute_cmd(void) {
-  // Check built-ins
+execute_cmd(char *in, char *out) {
+  // ----------- Check built-ins ----------
   if (strcmp(parsed_args[0], "cd") == 0) {
     if (cd_cmd() < 0) {
       fprintf(STDERR, "error\n");
@@ -148,7 +177,29 @@ execute_cmd(void) {
   }
 
   if (strcmp(parsed_args[0], "about") == 0) {
-    about_cmd();
+    if (out) {
+      int saved_fd = dup(1);
+      if (saved_fd < 0) {
+        fprintf(STDERR, "error\n");
+        return;
+      }
+
+      close(1);
+      if (open(out, O_WRONLY | O_CREATE | O_TRUNC) < 0) {
+        fprintf(STDERR, "error\n");
+        dup(saved_fd);
+        close(saved_fd);
+        return;
+      }
+
+      about_cmd();
+
+      close(1);
+      dup(saved_fd);
+      close(saved_fd);
+    } else {
+      about_cmd();
+    }
     return;
   }
 
@@ -156,7 +207,8 @@ execute_cmd(void) {
     exit_cmd();
   }
 
-  // Run exec
+  // ---------- Exec (if not built-in)  ----------
+
   int pid = fork();
   if (pid < 0) {
     fprintf(STDERR, "error\n"); // forking
@@ -210,6 +262,19 @@ main(int argc, char *argv[]) {
       continue;
     }
 
-    execute_cmd();
+    char *in = 0;
+    char *out = 0;
+
+    if (parse_redirections(parsed_args, &in, &out) < 0) {
+      fprintf(STDERR, "error\n");
+      continue;
+    }
+
+    if (parsed_args[0] == 0) {
+      fprintf(STDERR, "error\n");
+      continue;
+    }
+
+    execute_cmd(in, out);
   }
 }
