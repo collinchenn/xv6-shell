@@ -60,11 +60,12 @@ parse_input(char *line, char *argv[]) {
 }
 
 int
-parse_redirections(char *argv[], char **in, char **out) {
+parse_redirections(char *argv[], char **in, char **out, char **err) {
   int i = 0;
   int j = 0;
   *in = 0;
   *out = 0;
+  *err = 0;
 
   while (argv[i]) {
     if (strcmp("<", argv[i]) == 0) {
@@ -78,6 +79,12 @@ parse_redirections(char *argv[], char **in, char **out) {
         return -1;
       }
       *out = argv[i+1];
+      i += 2;
+    } else if (strcmp("!", argv[i]) == 0) {
+      if (argv[i+1] == 0 || *err) {
+        return -1;
+      }
+      *err = argv[i+1];
       i += 2;
     } else {
       argv[j++] = argv[i++];
@@ -148,7 +155,6 @@ exit_cmd(void) {
     status_code = parse_exit_status(parsed_args[1]);
   }
   printf(END_MSG);
-  printf("Returning status code: %d\n", status_code);
   exit(status_code);
 }
 
@@ -167,7 +173,7 @@ cd_cmd(void) {
 }
 
 void
-execute_cmd(char *in, char *out) {
+execute_cmd(char *in, char *out, char *err) {
   // ----------- Check built-ins ----------
   if (strcmp(parsed_args[0], "cd") == 0) {
     if (cd_cmd() < 0) {
@@ -244,6 +250,25 @@ execute_cmd(char *in, char *out) {
       }
     }
 
+    if (err) {
+      // First see if we can open the err file
+      // if not, we need to print to STDERR
+      int fd = open(err, O_WRONLY | O_CREATE | O_TRUNC);
+      if (fd < 0) {
+        fprintf(STDERR, "error\n");
+        exit(-1);
+      }
+
+      // If we were able to open the err file,
+      // then we can safely redirect to stderr=2
+      close(2);
+      if (dup(fd) < 0) {
+        fprintf(STDERR, "error\n");
+        exit(-1);
+      }
+      close(fd);
+    }
+
     if (exec(parsed_args[0], parsed_args) < 0) {
       // If exact path fails, see if only
       // the name of the binary file was given
@@ -291,8 +316,9 @@ main(int argc, char *argv[]) {
 
     char *in = 0;
     char *out = 0;
+    char *err = 0;
 
-    if (parse_redirections(parsed_args, &in, &out) < 0) {
+    if (parse_redirections(parsed_args, &in, &out, &err) < 0) {
       fprintf(STDERR, "error\n");
       continue;
     }
@@ -302,6 +328,6 @@ main(int argc, char *argv[]) {
       continue;
     }
 
-    execute_cmd(in, out);
+    execute_cmd(in, out, err);
   }
 }
