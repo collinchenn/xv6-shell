@@ -208,6 +208,15 @@ execute_cmd(char *in, char *out) {
   }
 
   // ---------- Exec (if not built-in)  ----------
+  // First check that input file exists
+  if (in) {
+    int fd = open(in, O_RDONLY);
+    if (fd < 0) {
+      fprintf(STDERR, "error\n");
+      return;
+    }
+    close(fd);
+  }
 
   int pid = fork();
   if (pid < 0) {
@@ -217,6 +226,24 @@ execute_cmd(char *in, char *out) {
 
   // If pid is the child, execute process
   if (pid == 0) {
+    if (in) {
+      close(0);
+      int fd = open(in, O_RDONLY);
+      if (fd < 0) {
+        fprintf(STDERR, "error\n");
+        exit(-1);
+      }
+    }
+
+    if (out) {
+      close(1);
+      int fd = open(out, O_WRONLY | O_CREATE | O_TRUNC);
+      if (fd < 0) {
+        fprintf(STDERR, "error\n");
+        exit(-1);
+      }
+    }
+
     if (exec(parsed_args[0], parsed_args) < 0) {
       // If exact path fails, see if only
       // the name of the binary file was given
@@ -236,7 +263,7 @@ execute_cmd(char *in, char *out) {
       // If this point is reached, can't EXEC
       fprintf(STDERR, "error\n");
       exit(1);
-      }
+    }
     // Otherwise, pid is parent; wait for child
   } else {
     wait(0);
