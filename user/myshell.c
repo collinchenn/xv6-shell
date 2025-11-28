@@ -2,10 +2,14 @@
 #include "kernel/fcntl.h"
 #include "user/user.h"
 
+#define STDIN 0
+#define STDOUT 1
 #define STDERR 2
 
 #define CMD_PROMPT "cs143a$ "
 #define END_MSG "bye\n"
+#define ERR_MSG "error\n"
+#define ABT_MSG "my about message\n"
 
 #define IB_LEN 1024
 #define MAX_ARGS 32 // exec only accepts 32
@@ -13,6 +17,11 @@
 
 static char input_buffer[IB_LEN];
 char* parsed_args[MAX_ARGS];
+
+void
+eprint(char *msg) {
+  fprintf(STDERR, "%s", msg);
+}
 
 int
 parse_input(char *line, char *argv[]) {
@@ -143,7 +152,11 @@ contains_slash(const char *s) {
 
 void
 about_cmd(void) {
-  printf("Made by Collin\n");
+    if (parsed_args[1]) {
+      fprintf(STDOUT, ABT_MSG);
+    } else {
+      fprintf(STDOUT, "Reference implementation\n");
+    }
 }
 
 void
@@ -177,7 +190,7 @@ execute_cmd(char *in, char *out, char *err) {
   // ----------- Check built-ins ----------
   if (strcmp(parsed_args[0], "cd") == 0) {
     if (cd_cmd() < 0) {
-      fprintf(STDERR, "error\n");
+      eprint(ERR_MSG);
     }
     return;
   }
@@ -186,13 +199,13 @@ execute_cmd(char *in, char *out, char *err) {
     if (out) {
       int saved_fd = dup(1);
       if (saved_fd < 0) {
-        fprintf(STDERR, "error\n");
+	eprint(ERR_MSG);
         return;
       }
 
       close(1);
       if (open(out, O_WRONLY | O_CREATE | O_TRUNC) < 0) {
-        fprintf(STDERR, "error\n");
+	eprint(ERR_MSG);
         dup(saved_fd);
         close(saved_fd);
         return;
@@ -218,7 +231,7 @@ execute_cmd(char *in, char *out, char *err) {
   if (in) {
     int fd = open(in, O_RDONLY);
     if (fd < 0) {
-      fprintf(STDERR, "error\n");
+      eprint(ERR_MSG);
       return;
     }
     close(fd);
@@ -226,7 +239,7 @@ execute_cmd(char *in, char *out, char *err) {
 
   int pid = fork();
   if (pid < 0) {
-    fprintf(STDERR, "error\n"); // forking
+    eprint(ERR_MSG);
     return;
   }
 
@@ -236,7 +249,7 @@ execute_cmd(char *in, char *out, char *err) {
       close(0);
       int fd = open(in, O_RDONLY);
       if (fd < 0) {
-        fprintf(STDERR, "error\n");
+	eprint(ERR_MSG);
         exit(-1);
       }
     }
@@ -245,7 +258,7 @@ execute_cmd(char *in, char *out, char *err) {
       close(1);
       int fd = open(out, O_WRONLY | O_CREATE | O_TRUNC);
       if (fd < 0) {
-        fprintf(STDERR, "error\n");
+	eprint(ERR_MSG);
         exit(-1);
       }
     }
@@ -255,7 +268,7 @@ execute_cmd(char *in, char *out, char *err) {
       // if not, we need to print to STDERR
       int fd = open(err, O_WRONLY | O_CREATE | O_TRUNC);
       if (fd < 0) {
-        fprintf(STDERR, "error\n");
+	eprint(ERR_MSG);
         exit(-1);
       }
 
@@ -263,7 +276,7 @@ execute_cmd(char *in, char *out, char *err) {
       // then we can safely redirect to stderr=2
       close(2);
       if (dup(fd) < 0) {
-        fprintf(STDERR, "error\n");
+        eprint(ERR_MSG);
         exit(-1);
       }
       close(fd);
@@ -286,7 +299,7 @@ execute_cmd(char *in, char *out, char *err) {
       }
 
       // If this point is reached, can't EXEC
-      fprintf(STDERR, "error\n");
+      eprint(ERR_MSG);
       exit(1);
     }
     // Otherwise, pid is parent; wait for child
@@ -300,7 +313,7 @@ main(int argc, char *argv[]) {
   memset(input_buffer, 0, IB_LEN);
 
   while (1) {
-    fprintf(STDERR, CMD_PROMPT);
+    eprint(CMD_PROMPT);
     gets(input_buffer, IB_LEN - 1);
 
     // Detect EOF/Crtl+D
@@ -319,12 +332,12 @@ main(int argc, char *argv[]) {
     char *err = 0;
 
     if (parse_redirections(parsed_args, &in, &out, &err) < 0) {
-      fprintf(STDERR, "error\n");
+      eprint(ERR_MSG);
       continue;
     }
 
     if (parsed_args[0] == 0) {
-      fprintf(STDERR, "error\n");
+      eprint(ERR_MSG);
       continue;
     }
 
