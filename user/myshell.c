@@ -14,13 +14,16 @@
 #define IB_LEN 1024
 #define MAX_ARGS 32 // exec only accepts 32
 #define MAX_CMD_LEN 512
+#define MAX_PIPE_CMD_LEN 16
+
+#define EXEC_ERR_STATUS 100
 
 static char input_buffer[IB_LEN];
 char* parsed_args[MAX_ARGS];
 
 void
-eprint(char *msg) {
-  fprintf(STDERR, "%s", msg);
+eprint(const char *msg) {
+  write(STDERR, msg, strlen(msg));
 }
 
 int
@@ -150,9 +153,19 @@ contains_slash(const char *s) {
   return 0;
 }
 
+int
+contains_pipe(void) {
+  for (int i = 0; parsed_args[i]; i++) {
+    if (strcmp(parsed_args[i], "|") == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 void
-about_cmd(void) {
-    if (parsed_args[1]) {
+about_cmd(char** args) {
+    if (args[1]) {
       fprintf(STDOUT, ABT_MSG);
     } else {
       fprintf(STDOUT, "Reference implementation\n");
@@ -187,7 +200,6 @@ cd_cmd(void) {
 
 void
 execute_cmd(char *in, char *out, char *err) {
-  // ----------- Check built-ins ----------
   if (strcmp(parsed_args[0], "cd") == 0) {
     if (cd_cmd() < 0) {
       eprint(ERR_MSG);
@@ -211,13 +223,13 @@ execute_cmd(char *in, char *out, char *err) {
         return;
       }
 
-      about_cmd();
+      about_cmd(parsed_args);
 
       close(1);
       dup(saved_fd);
       close(saved_fd);
     } else {
-      about_cmd();
+      about_cmd(parsed_args);
     }
     return;
   }
@@ -226,7 +238,6 @@ execute_cmd(char *in, char *out, char *err) {
     exit_cmd();
   }
 
-  // ---------- Exec (if not built-in)  ----------
   // First check that input file exists
   if (in) {
     int fd = open(in, O_RDONLY);
@@ -299,11 +310,182 @@ execute_cmd(char *in, char *out, char *err) {
       }
 
       // If this point is reached, can't EXEC
-      eprint(ERR_MSG);
-      exit(1);
+      if (out) {
+        unlink(out);
+      }
+
+      if (err) {
+        unlink(err);
+      }
+
+      exit(EXEC_ERR_STATUS);
     }
     // Otherwise, pid is parent; wait for child
   } else {
+    int status;
+    wait(&status);
+
+    if (status == EXEC_ERR_STATUS) {
+      fprintf(STDERR, ERR_MSG);
+    }
+  }
+}
+
+void
+execute_piped_cmd(void) {
+  char **cmds[MAX_PIPE_CMD_LEN];
+  char *cmd_in[MAX_PIPE_CMD_LEN] = {0};
+  char *cmd_out[MAX_PIPE_CMD_LEN] = {0};
+  char *cmd_err[MAX_PIPE_CMD_LEN] = {0};
+  int cmdc = 0;
+
+  // seperate parsed_args into cmds
+  cmds[cmdc++] = &parsed_args[0];
+  for (int i = 0; parsed_args[i]; i++) {
+    if (strcmp(parsed_args[i], "|") == 0) {
+      parsed_args[i] = 0;
+      cmds[cmdc++] = &parsed_args[i+1];
+    }
+  }
+
+  // get redirs for all cmds
+  for (int i = 0; i < cmdc; i++) {
+    if (parse_redirections(cmds[i], &cmd_in[i], &cmd_out[i], &cmd_err[i]) < 0) {
+      eprint(ERR_MSG);
+      return;
+    }
+  }
+
+  // cd and exit are not allowed built ins
+  for (int i = 0; i < cmdc; i++) {
+    if (strcmp(cmds[i][0], "cd") == 0 ||
+        strcmp(cmds[i][0], "exit") == 0) {
+      eprint(ERR_MSG);
+      return;
+    }
+  }
+
+  int pipec = cmdc - 1;
+  int pfds[2 * (MAX_PIPE_CMD_LEN - 1)];
+
+  for (int i = 0; i < pipec; i++) {
+    if (pipe(&pfds[2 * i]) < 0) {
+      eprint(ERR_MSG);
+      return;
+    }
+  }
+
+  // fork each cmd in cmds and execute
+  for (int i = 0; i < cmdc; i++) {
+    int pid = fork();
+    if (pid < 0) {
+      eprint(ERR_MSG);
+      break;
+    }
+
+    // CHILD
+    if (pid == 0) {
+      // input setup
+      if (i == 0) {
+        // if first cmd and has input redir
+        if (cmd_in[0]) {
+          close(0);
+          if (open(cmd_in[0], O_RDONLY) < 0) {
+            eprint(ERR_MSG);
+            exit(-1);
+          }
+        }
+      } else {
+        // if not first, pipe prev R (0,2,4,6,...)
+        close(0);
+        if (dup(pfds[2 * (i - 1)]) < 0) {
+          eprint(ERR_MSG);
+          exit(-1);
+        }
+      }
+
+      // output setup
+      if (i == cmdc - 1) {
+        // if last cmd and has output redir
+        if (cmd_out[i]) {
+          close(1);
+          if (open(cmd_out[i], O_WRONLY | O_CREATE | O_TRUNC) < 0) {
+            eprint(ERR_MSG);
+            exit(-1);
+          }
+        }
+      } else {
+        // if not last, pipe to next W (1,3,5,7,...)
+        close(1);
+        if (dup(pfds[2 * i + 1]) < 0) {
+          eprint(ERR_MSG);
+          exit(-1);
+        }
+      }
+
+      // stderr setup
+      if (cmd_err[i]) {
+        int fd_err = open(cmd_err[i], O_WRONLY | O_CREATE | O_TRUNC);
+        if (fd_err < 0) {
+          eprint(ERR_MSG);
+          exit(-1);
+        }
+        close(2);
+        if (dup(fd_err) < 0) {
+          eprint(ERR_MSG);
+          exit(-1);
+        }
+        close(fd_err);
+      }
+
+      // close pipes since we already duped
+      for (int k = 0; k < 2 * pipec; k++) {
+        close(pfds[k]);
+      }
+
+      // if cmd is built-in
+      if (strcmp(cmds[i][0], "about") == 0) {
+        about_cmd(cmds[i]);
+        exit(0);
+      }
+
+      // run exec
+      if (exec(cmds[i][0], cmds[i]) < 0) {
+        // fallback
+        if (!contains_slash(cmds[i][0])) {
+          char fallback[MAX_CMD_LEN];
+          int j = 0;
+
+          fallback[j++] = '/';
+          for (char *s = cmds[i][0]; *s && j < MAX_CMD_LEN - 1; s++) {
+            fallback[j++] = *s;
+          }
+          fallback[j] = '\0';
+
+          exec(fallback, cmds[i]);
+        }
+
+        // unlink out or err redir
+        if (cmd_out[i]) {
+          unlink(cmd_out[i]);
+        }
+        if (cmd_err[i]) {
+          unlink(cmd_err[i]);
+        }
+
+        eprint(ERR_MSG);
+        exit(1);
+      }
+      // child never reaches here
+    }
+  }
+
+  // PARENT
+  // close all pipe fds, wait for children
+  for (int k = 0; k < 2 * pipec; k++) {
+    close(pfds[k]);
+  }
+  for (int i = 0; i < cmdc; i++) {
     wait(0);
   }
 }
@@ -327,6 +509,15 @@ main(int argc, char *argv[]) {
       continue;
     }
 
+    // Check if command has '|', if it does
+    // then run the execute_piped_cmd()
+    if (contains_pipe()) {
+      execute_piped_cmd();
+      continue;
+    }
+
+    // Otherwise, proceed with regular
+    // execute_cmd()
     char *in = 0;
     char *out = 0;
     char *err = 0;
