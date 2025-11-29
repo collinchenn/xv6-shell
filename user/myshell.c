@@ -1,3 +1,5 @@
+// collic4
+
 #include "kernel/types.h"
 #include "kernel/fcntl.h"
 #include "user/user.h"
@@ -391,16 +393,14 @@ execute_piped_cmd(void) {
         if (cmd_in[0]) {
           close(0);
           if (open(cmd_in[0], O_RDONLY) < 0) {
-            eprint(ERR_MSG);
-            exit(-1);
+            exit(EXEC_ERR_STATUS);
           }
         }
       } else {
         // if not first, pipe prev R (0,2,4,6,...)
         close(0);
         if (dup(pfds[2 * (i - 1)]) < 0) {
-          eprint(ERR_MSG);
-          exit(-1);
+          exit(EXEC_ERR_STATUS);
         }
       }
 
@@ -410,16 +410,14 @@ execute_piped_cmd(void) {
         if (cmd_out[i]) {
           close(1);
           if (open(cmd_out[i], O_WRONLY | O_CREATE | O_TRUNC) < 0) {
-            eprint(ERR_MSG);
-            exit(-1);
+            exit(EXEC_ERR_STATUS);
           }
         }
       } else {
         // if not last, pipe to next W (1,3,5,7,...)
         close(1);
         if (dup(pfds[2 * i + 1]) < 0) {
-          eprint(ERR_MSG);
-          exit(-1);
+          exit(EXEC_ERR_STATUS);
         }
       }
 
@@ -427,13 +425,11 @@ execute_piped_cmd(void) {
       if (cmd_err[i]) {
         int fd_err = open(cmd_err[i], O_WRONLY | O_CREATE | O_TRUNC);
         if (fd_err < 0) {
-          eprint(ERR_MSG);
-          exit(-1);
+          exit(EXEC_ERR_STATUS);
         }
         close(2);
         if (dup(fd_err) < 0) {
-          eprint(ERR_MSG);
-          exit(-1);
+          exit(EXEC_ERR_STATUS);
         }
         close(fd_err);
       }
@@ -473,8 +469,7 @@ execute_piped_cmd(void) {
           unlink(cmd_err[i]);
         }
 
-        eprint(ERR_MSG);
-        exit(1);
+        exit(EXEC_ERR_STATUS);
       }
       // child never reaches here
     }
@@ -485,8 +480,15 @@ execute_piped_cmd(void) {
   for (int k = 0; k < 2 * pipec; k++) {
     close(pfds[k]);
   }
+  int shell_err = 0;
   for (int i = 0; i < cmdc; i++) {
-    wait(0);
+    int status;
+    if (wait(&status) >= 0 && status == EXEC_ERR_STATUS) {
+      shell_err = 1;
+    }
+  }
+  if (shell_err) {
+    eprint(ERR_MSG);
   }
 }
 
